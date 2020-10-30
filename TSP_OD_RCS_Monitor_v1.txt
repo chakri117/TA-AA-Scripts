@@ -1,0 +1,87 @@
+
+#Paste below text completely. Do not leave even the last blank lines. See the monitor is loaded with proper threshold at the end.
+
+cat > $JBOSS_HOME/monitors/tsp_od_rcs_monitor.cfg <<EOF1
+module.id = ALERT_MON_TSP_OD_RCS
+module.group = host
+module.resource.group = host_rg
+module.description = Monitor to check whether TSP RCS & On-Demand RCS are in sync.
+module.type = monitor
+
+chk.user = root
+chk.schedule.expression = 0 0 07 * * ? *
+
+threshold.critical = 1
+EOF1
+
+chmod 777 $JBOSS_HOME/monitors/tsp_od_rcs_monitor.cfg
+chown root:oam $JBOSS_HOME/monitors/tsp_od_rcs_monitor.cfg
+
+cat > $JBOSS_HOME/monitors/tsp_od_rcs_monitor.chk <<'EOF2'
+#!/bin/ksh
+###########################################################################
+##  File Name : tsp_od_rcs_monitor.cfg                                   ##
+##  Desc      : This shell script checks for sync between TSP RCS &      ##
+##              On-Demand RCS. It is expected that TSP starts-up earlier ##
+##              than OnDemand RCS at all times. An alarm is generated    ##
+##              in case of discrepancy.                                  ##
+##  Creator  : chakradb@amdocs.com                                       ##
+##  Date     : 19-10-2020                                                ##
+##                                                                       ##
+###########################################################################
+
+#Log file
+Day=`date |awk '{print $1}'`
+Log_Dir="$JBOSS_HOME/log"
+LOGFILE="$Log_Dir/TSP_OD_RCS_monitor.${Day}.log"
+echo "[`date '+%H:%M:%S'`] INFO: TSP_OD_RCS_monitor Started" >$LOGFILE
+echo "[`date '+%H:%M:%S'`] INFO: Checking whether both the processes are running..." >>$LOGFILE
+
+#Check whether TSP_RCS and OD_RCS are running
+
+TSP=`ps -eaf |grep -i tsprcs |grep -ivE "grep|arbor" |awk '{print $2}' |wc -l`
+OD=`ps -eaf|grep -i "./ure" |grep -i ure_onDemand_ |grep -ivE "grep|rt|arbor" |awk '{print $2}' |wc -l`
+
+if [ $TSP == 1 ] && [ $OD == 1 ]; then
+  echo "[`date '+%H:%M:%S'`] INFO: TSP_RCS and OD_RCS are running." >>$LOGFILE
+elif [ $TSP -gt 1 ] || [ $OD -gt 1 ]; then
+  echo "[`date '+%H:%M:%S'`] ERROR: Multiple TSP/OD RCS are running." >>$LOGFILE
+  print "STATUS=1";
+  print "INFO=Multiple TSP/OD RCS are running\n" ;
+  exit 0
+  else
+  echo "[`date '+%H:%M:%S'`] ERROR: Either/both TSP,OD RCS are not running. Please start the process" >>$LOGFILE
+  print "STATUS=1";
+  print "INFO=Please check whether RCS processes are running\n" ;
+  exit 0
+fi
+
+
+#Check for the elapsed time of TSP_RCS & OD_RCS processes
+
+TSP_Pr=`ps -eo pid,etime,args |grep -i tsprcs |grep -v grep`
+echo "[`date '+%H:%M:%S'`] INFO: TSP_RCS: $TSP_Pr" >>$LOGFILE
+OD_Pr=`ps -eo pid,etime,args |grep -i "./ure" |grep -i ure_onDemand_ |grep -viE "grep|rt|arbor"`
+echo "[`date '+%H:%M:%S'`] INFO: OD_RCS: $OD_Pr" >>$LOGFILE
+
+TSP_Et=`echo $TSP_Pr |awk '{ split($2, A, ":"); split(A[1], B, "-"); $2=A[3] + (A[2]*60) + (B[2]*3600)+(B[1]*3600*24) } 1' |awk '{print $2}'`
+OD_Et=`echo $OD_Pr |awk '{ split($2, A, ":"); split(A[1], B, "-"); $2=A[3] + (A[2]*60) + (B[2]*3600)+(B[1]*3600*24) } 1' |awk '{print $2}'`
+
+
+if [ $TSP_Et -gt $OD_Et ]; then
+echo "[`date '+%H:%M:%S'`] INFO: TSP_RCS and OD_RCS are in sync." >>$LOGFILE
+echo "[`date '+%H:%M:%S'`] INFO: TSP_OD_RCS_monitor completed Successfully" >>$LOGFILE
+print "STATUS=0";
+print "INFO=OK\n" ;
+
+else
+echo "[`date '+%H:%M:%S'`] ERROR: OD_RCS started earlier than TSP_RCS." >>$LOGFILE
+          print "STATUS=1";
+          print "INFO=OD_RCS started before TSP_RCS\n" ;
+   exit 0
+fi
+EOF2
+
+
+chmod 777 $JBOSS_HOME/monitors/tsp_od_rcs_monitor.chk
+chown root:oam $JBOSS_HOME/monitors/tsp_od_rcs_monitor.chk
